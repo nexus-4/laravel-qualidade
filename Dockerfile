@@ -13,7 +13,7 @@ COPY php/qualidade.ini /usr/local/etc/php/conf.d/zz-qualidade.ini
 
 RUN mkdir -p /tools/rector /tools/infection \
     && composer --working-dir=/tools/rector require --no-interaction --no-progress \
-        rector/rector:2.8.1 driftingly/rector-laravel:2.7.3 \
+        rector/rector:2.8.1 driftingly/rector-laravel:2.7.3 phpstan/phpstan:2.3.3 \
     && echo '{}' > /tools/infection/composer.json \
     && composer --working-dir=/tools/infection config --no-plugins allow-plugins.infection/extension-installer true \
     && composer --working-dir=/tools/infection require --no-interaction --no-progress infection/infection:0.29.14 \
