@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TOOLBOX_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+IMAGE="${QUALIDADE_IMAGEM:-laravel-qualidade:php8.4}"
+
+BASE="origin/homologation"
+LEVEL=6
+TESTS=""
+THREADS=1
+
+usage() {
+    cat <<'HELP'
+Uso: qualidade <comando> [opções]
+
+Comandos:
+  phpstan     PHPStan + Larastan nos arquivos de app/ alterados na branch
+  rector      Rector em simulação nos arquivos de app/ alterados na branch
+  cobertura   testes com PCOV, relatório HTML e dados para o Infection
+  infection   cobertura e depois Infection só nas linhas alteradas
+  tudo        phpstan, rector e infection, com um resumo no final
+
+Opções:
+  --base=<ref>      branch ou commit de comparação (padrão: origin/homologation)
+  --nivel=<0-10>    nível do PHPStan (padrão: 6)
+  --testes=<path>   roda só esses testes na cobertura e no Infection
+  --threads=<n>     threads do Infection (padrão: 1, por causa do banco de testes)
+HELP
+}
+
+COMMAND="${1:-ajuda}"
+[ $# -gt 0 ] && shift
+
+for arg in "$@"; do
+    case "$arg" in
+        --base=*)    BASE="${arg#*=}" ;;
+        --nivel=*)   LEVEL="${arg#*=}" ;;
+        --testes=*)  TESTS="${arg#*=}" ;;
+        --threads=*) THREADS="${arg#*=}" ;;
+        *) echo "Opção desconhecida: $arg" >&2; usage; exit 2 ;;
+    esac
+done
+
+if [ "$COMMAND" = "ajuda" ] || [ "$COMMAND" = "--help" ] || [ "$COMMAND" = "-h" ]; then
+    usage
+    exit 0
+fi
+
+PROJECT_DIR="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "Rode dentro de um projeto com git." >&2
+    exit 1
+}
+PROJECT_NAME="$(basename "$PROJECT_DIR")"
+CACHE_DIR="$TOOLBOX_DIR/cache"
+REPORTS_DIR="$TOOLBOX_DIR/relatorios/$PROJECT_NAME"
+mkdir -p "$CACHE_DIR" "$REPORTS_DIR"
+
+run_container() {
+    local linux_host=()
+    [ "$(uname -s)" = "Linux" ] && linux_host=(--add-host=host.docker.internal:host-gateway)
+
+    docker run --rm \
+        --user "$(id -u):$(id -g)" \
+        ${linux_host[@]+"${linux_host[@]}"} \
+        -e HOME=/tmp \
+        -e COMPOSER_HOME=/cache/composer \
+        -e DB_HOST=host.docker.internal \
+        -e REDIS_HOST=host.docker.internal \
+        -v "$PROJECT_DIR":/app \
+        -v "$CACHE_DIR":/cache \
+        -v "$REPORTS_DIR":/relatorios \
+        -v "$TOOLBOX_DIR/modelos":/modelos:ro \
+        -w /app \
+        "$IMAGE" "$@"
+}
+
+changed_php_files() {
+    local merge_base
+    merge_base="$(git -C "$PROJECT_DIR" merge-base "$BASE" HEAD)" || {
+        echo "Não achei a base '$BASE'. Rode 'git fetch' ou passe --base=<ref>." >&2
+        exit 1
+    }
+
+    {
+        git -C "$PROJECT_DIR" diff --name-only --diff-filter=ACMR "$merge_base" -- 'app/*.php'
+        git -C "$PROJECT_DIR" ls-files --others --exclude-standard -- 'app/*.php'
+    } | sort -u | while read -r file; do
+        [ -f "$PROJECT_DIR/$file" ] && echo "$file"
+    done
+}
+
+package_version() {
+    run_container php -r '
+        $lock = json_decode(file_get_contents("composer.lock"), true);
+        foreach (array_merge($lock["packages"] ?? [], $lock["packages-dev"] ?? []) as $package) {
+            if ($package["name"] === $argv[1]) {
+                echo ltrim($package["version"], "v");
+            }
+        }
+    ' "$1"
+}
+
+ensure_larastan() {
+    local laravel carbon constraint dir
+    laravel="$(package_version laravel/framework)"
+    [ -n "$laravel" ] || { echo "Não achei laravel/framework no composer.lock." >&2; exit 1; }
+    carbon="$(package_version nesbot/carbon)"
+
+    constraint="^3.0"
+    [ "${laravel%%.*}" -lt 11 ] && constraint="^2.0"
+
+    dir="larastan/laravel-$laravel"
+    if [ ! -x "$CACHE_DIR/$dir/vendor/bin/phpstan" ]; then
+        echo "Instalando o Larastan para o Laravel $laravel (só na primeira vez)..." >&2
+        mkdir -p "$CACHE_DIR/$dir"
+        echo '{"config": {"allow-plugins": {"php-http/discovery": false}}}' > "$CACHE_DIR/$dir/composer.json"
+        run_container composer --working-dir="/cache/$dir" require --no-interaction --no-progress --quiet \
+            "larastan/larastan:$constraint" "laravel/framework:$laravel" ${carbon:+"nesbot/carbon:$carbon"} >&2
+    fi
+
+    echo "/cache/$dir"
+}
+
+run_phpstan() {
+    local files larastan
+    files="$(changed_php_files)"
+    if [ -z "$files" ]; then
+        echo "PHPStan: nenhum arquivo PHP de app/ alterado em relação a $BASE."
+        return 0
+    fi
+
+    larastan="$(ensure_larastan)"
+
+    {
+        echo "includes:"
+        echo "    - $larastan/vendor/larastan/larastan/extension.neon"
+        echo "    - /modelos/phpstan.neon"
+        echo "parameters:"
+        echo "    level: $LEVEL"
+        echo "    tmpDir: /cache/phpstan-tmp/$PROJECT_NAME"
+        echo "    bootstrapFiles:"
+        echo "        - /app/vendor/autoload.php"
+        echo "    paths:"
+        echo "$files" | sed 's#^#        - /app/#'
+    } > "$REPORTS_DIR/phpstan.neon"
+
+    echo "PHPStan nível $LEVEL em $(echo "$files" | wc -l | tr -d ' ') arquivos alterados..."
+    run_container "$larastan/vendor/bin/phpstan" analyse -c /relatorios/phpstan.neon --memory-limit=1G --no-progress \
+        | tee "$REPORTS_DIR/phpstan.txt"
+}
+
+run_rector() {
+    local files
+    files="$(changed_php_files)"
+    if [ -z "$files" ]; then
+        echo "Rector: nenhum arquivo PHP de app/ alterado em relação a $BASE."
+        return 0
+    fi
+
+    echo "Rector (simulação) em $(echo "$files" | wc -l | tr -d ' ') arquivos alterados..."
+    # shellcheck disable=SC2086
+    run_container rector process --dry-run --config=/modelos/rector.php --no-progress-bar $files \
+        | tee "$REPORTS_DIR/rector.txt"
+}
+
+run_coverage() {
+    rm -rf "$REPORTS_DIR/cobertura" "$REPORTS_DIR/cobertura-html"
+    mkdir -p "$REPORTS_DIR/cobertura"
+
+    echo "Testes com cobertura${TESTS:+ em $TESTS}..."
+    # shellcheck disable=SC2086
+    run_container php vendor/bin/phpunit $TESTS \
+        --coverage-filter app \
+        --coverage-html /relatorios/cobertura-html \
+        --coverage-xml /relatorios/cobertura/coverage-xml \
+        --log-junit /relatorios/cobertura/junit.xml \
+        --coverage-text --only-summary-for-coverage-text \
+        | tee "$REPORTS_DIR/cobertura.txt"
+
+    echo "Relatório: $REPORTS_DIR/cobertura-html/index.html"
+}
+
+run_infection() {
+    run_coverage || true
+
+    cat > "$REPORTS_DIR/infection.json5" <<JSON
+{
+    "source": { "directories": ["app"] },
+    "timeout": 30,
+    "tmpDir": "/cache/infection-tmp/$PROJECT_NAME",
+    "logs": {
+        "text": "/relatorios/infection.log",
+        "html": "/relatorios/infection.html",
+        "summary": "/relatorios/infection-resumo.log"
+    },
+    "phpUnit": { "configDir": "/app" },
+    "mutators": { "@default": true }
+}
+JSON
+
+    echo "Infection nas linhas alteradas em relação a $BASE..."
+    run_container infection \
+        --configuration=/relatorios/infection.json5 \
+        --coverage=/relatorios/cobertura \
+        --skip-initial-tests \
+        --git-diff-lines \
+        --git-diff-base="$BASE" \
+        --threads="$THREADS" \
+        --no-progress \
+        --no-interaction \
+        | tee "$REPORTS_DIR/infection.txt"
+
+    echo "Relatório: $REPORTS_DIR/infection.html"
+}
+
+summary() {
+    echo
+    echo "================ Resumo ($PROJECT_NAME, base $BASE) ================"
+    printf '%-12s %s\n' "PHPStan" "$(grep -E 'No errors|Found [0-9]+ error' "$REPORTS_DIR/phpstan.txt" 2>/dev/null | tail -1 | sed 's/^ *//;s/\[OK\] *//;s/\[ERROR\] *//' || true)"
+    printf '%-12s %s\n' "Rector" "$(grep -E 'would have changed|Rector is done' "$REPORTS_DIR/rector.txt" 2>/dev/null | tail -1 | sed 's/^ *//;s/\[OK\] *//' || true)"
+    printf '%-12s %s\n' "Cobertura" "$(grep -E '^ *Lines:' "$REPORTS_DIR/cobertura.txt" 2>/dev/null | head -1 | sed 's/^ *//' || true)"
+    printf '%-12s %s\n' "Infection" "$(grep -E 'Mutation Score Indicator' "$REPORTS_DIR/infection.txt" 2>/dev/null | tail -1 | sed 's/^ *//' || true)"
+    echo "Relatórios em $REPORTS_DIR"
+}
+
+case "$COMMAND" in
+    phpstan)   run_phpstan ;;
+    rector)    run_rector ;;
+    cobertura) run_coverage ;;
+    infection) run_infection ;;
+    tudo)
+        rm -f "$REPORTS_DIR"/phpstan.txt "$REPORTS_DIR"/rector.txt "$REPORTS_DIR"/cobertura.txt "$REPORTS_DIR"/infection.txt
+        run_phpstan || true
+        run_rector || true
+        run_infection || true
+        summary
+        ;;
+    *) echo "Comando desconhecido: $COMMAND" >&2; usage; exit 2 ;;
+esac
