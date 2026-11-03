@@ -107,7 +107,8 @@ Ficam em `relatorios/<nome-do-projeto>/`, fora do projeto:
 
 - **Só o que mudou.** O script compara a branch com a base (`git merge-base`) e passa para o PHPStan e o Rector
   os arquivos de `app/` alterados, inclusive os ainda não commitados. O Infection usa `--git-diff-lines` e muta
-  só as linhas alteradas.
+  só as linhas alteradas; os arquivos novos sem commit entram com `git add --intent-to-add` durante a execução e
+  voltam a ficar sem commit no final.
 - **Larastan na versão certa.** O Larastan precisa da mesma versão do Laravel do projeto. O script lê
   `laravel/framework` e `nesbot/carbon` do `composer.lock` e instala o Larastan correspondente em
   `cache/larastan/laravel-<versão>`. A primeira vez em cada versão leva cerca de um minuto; depois é instantâneo.
@@ -128,6 +129,8 @@ Ficam em `relatorios/<nome-do-projeto>/`, fora do projeto:
 | Testes em paralelo disputam o mesmo banco de testes e geram timeouts falsos no Infection | `--threads=1` por padrão |
 | No Mac, `--add-host=host.docker.internal:host-gateway` quebra o acesso aos serviços | o `--add-host` só é usado no Linux |
 | O git recusa o repositório montado ("dubious ownership") | `safe.directory '*'` na imagem |
+| O `--git-diff-lines` do Infection ignora arquivos novos sem commit, e o MSI sai inflado | o script marca esses arquivos com `git add --intent-to-add` só durante o Infection |
+| O resumo do Rector ficava vazio, porque a versão 2.8 escreve "would have been changed" | a regex do resumo aceita as duas formas |
 | Regras do Rector que contrariam o padrão dos projetos (`strict_types`, `dispatch()`, `resolve()`, `instanceof` no lugar de `=== null`, `compact()`) | puladas em `modelos/rector.php` |
 
 ## Problemas comuns

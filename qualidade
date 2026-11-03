@@ -198,6 +198,15 @@ run_infection() {
 }
 JSON
 
+    local untracked
+    untracked="$(git -C "$PROJECT_DIR" ls-files --others --exclude-standard -- 'app/*.php')"
+
+    if [ -n "$untracked" ]; then
+        echo "$untracked" | xargs git -C "$PROJECT_DIR" add --intent-to-add --
+    fi
+
+    local status=0
+
     echo "Infection nas linhas alteradas em relação a $BASE..."
     run_container infection \
         --configuration=/relatorios/infection.json5 \
@@ -208,7 +217,13 @@ JSON
         --threads="$THREADS" \
         --no-progress \
         --no-interaction \
-        | tee "$REPORTS_DIR/infection.txt"
+        | tee "$REPORTS_DIR/infection.txt" || status=$?
+
+    if [ -n "$untracked" ]; then
+        echo "$untracked" | xargs git -C "$PROJECT_DIR" reset --quiet --
+    fi
+
+    [ "$status" -eq 0 ] || return "$status"
 
     echo "Relatório: $REPORTS_DIR/infection.html"
 }
@@ -217,7 +232,7 @@ summary() {
     echo
     echo "================ Resumo ($PROJECT_NAME, base $BASE) ================"
     printf '%-12s %s\n' "PHPStan" "$(grep -E 'No errors|Found [0-9]+ error' "$REPORTS_DIR/phpstan.txt" 2>/dev/null | tail -1 | sed 's/^ *//;s/\[OK\] *//;s/\[ERROR\] *//' || true)"
-    printf '%-12s %s\n' "Rector" "$(grep -E 'would have changed|Rector is done' "$REPORTS_DIR/rector.txt" 2>/dev/null | tail -1 | sed 's/^ *//;s/\[OK\] *//' || true)"
+    printf '%-12s %s\n' "Rector" "$(grep -E 'would have (been )?changed|Rector is done' "$REPORTS_DIR/rector.txt" 2>/dev/null | tail -1 | sed 's/^ *//;s/\[OK\] *//' || true)"
     printf '%-12s %s\n' "Cobertura" "$(grep -E '^ *Lines:' "$REPORTS_DIR/cobertura.txt" 2>/dev/null | head -1 | sed 's/^ *//' || true)"
     printf '%-12s %s\n' "Infection" "$(grep -E 'Mutation Score Indicator' "$REPORTS_DIR/infection.txt" 2>/dev/null | tail -1 | sed 's/^ *//' || true)"
     echo "Relatórios em $REPORTS_DIR"
