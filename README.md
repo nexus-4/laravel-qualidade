@@ -60,6 +60,7 @@ qualidade ajuda         # lista os comandos e as opções
 | `--base=<ref>` | `origin/homologation` | branch ou commit de comparação. Ex.: `--base=origin/master`, `--base=HEAD~1` |
 | `--nivel=<0-10>` | `6` | nível do PHPStan. O 8 procura `null` sem tratamento |
 | `--testes=<path>` | todos | roda só esses testes na cobertura e no Infection. Bem mais rápido |
+| `--aplicar` | desligado | só no `rector`: grava as mudanças nos arquivos em vez de simular. Recusa se algum desses arquivos tiver mudança sem commit |
 | `--threads=<n>` | `1` | threads do Infection. Só aumente se cada thread tiver o próprio banco de testes |
 
 ### Exemplos

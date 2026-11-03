@@ -8,6 +8,7 @@ BASE="origin/homologation"
 LEVEL=6
 TESTS=""
 THREADS=1
+APPLY=0
 
 usage() {
     cat <<'HELP'
@@ -25,6 +26,7 @@ Opções:
   --nivel=<0-10>    nível do PHPStan (padrão: 6)
   --testes=<path>   roda só esses testes na cobertura e no Infection
   --threads=<n>     threads do Infection (padrão: 1, por causa do banco de testes)
+  --aplicar         rector: grava as mudanças nos arquivos (exige os arquivos sem mudanças pendentes)
 HELP
 }
 
@@ -37,6 +39,7 @@ for arg in "$@"; do
         --nivel=*)   LEVEL="${arg#*=}" ;;
         --testes=*)  TESTS="${arg#*=}" ;;
         --threads=*) THREADS="${arg#*=}" ;;
+        --aplicar)   APPLY=1 ;;
         *) echo "Opção desconhecida: $arg" >&2; usage; exit 2 ;;
     esac
 done
@@ -154,6 +157,28 @@ run_rector() {
     files="$(changed_php_files)"
     if [ -z "$files" ]; then
         echo "Rector: nenhum arquivo PHP de app/ alterado em relação a $BASE."
+        return 0
+    fi
+
+    if [ "$APPLY" -eq 1 ]; then
+        local pending
+        # shellcheck disable=SC2086
+        pending="$(git -C "$PROJECT_DIR" status --porcelain -- $files)"
+        if [ -n "$pending" ]; then
+            echo "Rector: não apliquei, porque estes arquivos têm mudanças sem commit:" >&2
+            echo "$pending" >&2
+            echo "Faça o commit (ou git stash) e rode de novo, para o diff mostrar só o que o Rector mudou." >&2
+            return 1
+        fi
+
+        echo "Rector (aplicando) em $(echo "$files" | wc -l | tr -d ' ') arquivos alterados..."
+        # shellcheck disable=SC2086
+        run_container rector process --config=/modelos/rector.php --no-progress-bar $files \
+            | tee "$REPORTS_DIR/rector.txt"
+
+        echo
+        git -C "$PROJECT_DIR" diff --stat
+        echo "Revise na IDE (ou com git diff), rode o Pint e os testes. Para desfazer: git restore <arquivo>."
         return 0
     fi
 
