@@ -75,16 +75,24 @@ qualidade infection --base=HEAD~1 --testes=tests/Feature/EducationalText/Generat
 Saída do `qualidade tudo`:
 
 ```
-================ Resumo (banco-de-questoes, base HEAD~1) ================
-PHPStan      No errors
-Rector       Rector is done!
-Cobertura    Lines:    1.68% (376/22344)
-Infection    Mutation Score Indicator (MSI): 96%
+================ Resumo (banco-de-questoes, base origin/homologation) ================
+PHPStan      0 nas suas linhas  (47 em código antigo)
+Rector       0 nas suas linhas  (10 em código antigo)
+Cobertura    100.0% das linhas alteradas  (0 sem teste)
+Infection    MSI 99%  (0 escaparam, 1 provavelmente equivalentes; sem eles, MSI 100%)
 Relatórios em ~/ferramentas/laravel-qualidade/relatorios/banco-de-questoes
 ```
 
-A linha "Cobertura" é do projeto inteiro e fica baixa quando você usa `--testes`. O número que importa para a
-branch é o do Infection, que só olha as linhas alteradas.
+O script cruza cada achado com as linhas que a branch mudou (`git diff` contra a base, incluindo o que ainda não
+tem commit):
+
+- **"Nas suas linhas"** é o que você precisa olhar. Cada item vem como `arquivo:linha`, que o terminal da IDE abre
+  com um clique, e o Rector mostra o diff do trecho.
+- **"Em código antigo"** é o que já existia nos arquivos que você mexeu. Aparece só como contagem; a lista completa
+  fica nos relatórios.
+- **Cobertura** considera só as linhas executáveis que você alterou e lista as que nenhum teste executa.
+- **Infection** separa os mutantes que escaparam dos provavelmente equivalentes (hoje: `public` virando
+  `protected` numa action de controller, que o Laravel chama de dentro da classe) e mostra o MSI sem eles.
 
 ### Relatórios
 
@@ -94,7 +102,8 @@ Ficam em `relatorios/<nome-do-projeto>/`, fora do projeto:
 |---|---|
 | `cobertura-html/index.html` | cobertura linha a linha (abra no navegador) |
 | `infection.html` | cada mutante, morto ou que escapou, com o diff (abra no navegador) |
-| `phpstan.txt`, `rector.txt`, `cobertura.txt`, `infection.txt` | a saída de cada ferramenta |
+| `phpstan.txt`, `rector.txt`, `cobertura.txt`, `infection.txt` | a saída de cada ferramenta, já separada |
+| `phpstan.json`, `rector.json`, `cobertura/clover.xml`, `infection.json` | os dados completos que o script lê, inclusive o código antigo |
 
 ### Como ler o Infection
 

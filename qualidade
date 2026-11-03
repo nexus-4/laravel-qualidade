@@ -73,16 +73,25 @@ run_container() {
         -v "$CACHE_DIR":/cache \
         -v "$REPORTS_DIR":/relatorios \
         -v "$TOOLBOX_DIR/modelos":/modelos:ro \
+        -v "$TOOLBOX_DIR/scripts":/scripts:ro \
         -w /app \
         "$IMAGE" "$@"
 }
 
-changed_php_files() {
-    local merge_base
-    merge_base="$(git -C "$PROJECT_DIR" merge-base "$BASE" HEAD)" || {
+merge_base() {
+    git -C "$PROJECT_DIR" merge-base "$BASE" HEAD || {
         echo "Não achei a base '$BASE'. Rode 'git fetch' ou passe --base=<ref>." >&2
         exit 1
     }
+}
+
+report() {
+    run_container php /scripts/relatorio.php "$1" "$(merge_base)"
+}
+
+changed_php_files() {
+    local merge_base
+    merge_base="$(merge_base)"
 
     {
         git -C "$PROJECT_DIR" diff --name-only --diff-filter=ACMR "$merge_base" -- 'app/*.php'
@@ -149,7 +158,9 @@ run_phpstan() {
 
     echo "PHPStan nível $LEVEL em $(echo "$files" | wc -l | tr -d ' ') arquivos alterados..."
     run_container "$larastan/vendor/bin/phpstan" analyse -c /relatorios/phpstan.neon --memory-limit=1G --no-progress \
-        | tee "$REPORTS_DIR/phpstan.txt"
+        --error-format=json > "$REPORTS_DIR/phpstan.json" || true
+
+    report phpstan | tee "$REPORTS_DIR/phpstan.txt"
 }
 
 run_rector() {
@@ -184,8 +195,10 @@ run_rector() {
 
     echo "Rector (simulação) em $(echo "$files" | wc -l | tr -d ' ') arquivos alterados..."
     # shellcheck disable=SC2086
-    run_container rector process --dry-run --config=/modelos/rector.php --no-progress-bar $files \
-        | tee "$REPORTS_DIR/rector.txt"
+    run_container rector process --dry-run --config=/modelos/rector.php --no-progress-bar --output-format=json $files \
+        > "$REPORTS_DIR/rector.json" || true
+
+    report rector | tee "$REPORTS_DIR/rector.txt"
 }
 
 run_coverage() {
@@ -198,10 +211,12 @@ run_coverage() {
         --coverage-filter app \
         --coverage-html /relatorios/cobertura-html \
         --coverage-xml /relatorios/cobertura/coverage-xml \
+        --coverage-clover /relatorios/cobertura/clover.xml \
         --log-junit /relatorios/cobertura/junit.xml \
         --coverage-text --only-summary-for-coverage-text \
         | tee "$REPORTS_DIR/cobertura.txt"
 
+    report cobertura | tee -a "$REPORTS_DIR/cobertura.txt"
     echo "Relatório: $REPORTS_DIR/cobertura-html/index.html"
 }
 
@@ -216,7 +231,8 @@ run_infection() {
     "logs": {
         "text": "/relatorios/infection.log",
         "html": "/relatorios/infection.html",
-        "summary": "/relatorios/infection-resumo.log"
+        "summary": "/relatorios/infection-resumo.log",
+        "json": "/relatorios/infection.json"
     },
     "phpUnit": { "configDir": "/app" },
     "mutators": { "@default": true }
@@ -242,24 +258,34 @@ JSON
         --threads="$THREADS" \
         --no-progress \
         --no-interaction \
-        | tee "$REPORTS_DIR/infection.txt" || status=$?
+        > "$REPORTS_DIR/infection.txt" 2>&1 || status=$?
 
     if [ -n "$untracked" ]; then
         echo "$untracked" | xargs git -C "$PROJECT_DIR" reset --quiet --
     fi
 
-    [ "$status" -eq 0 ] || return "$status"
+    if [ "$status" -ne 0 ]; then
+        tail -20 "$REPORTS_DIR/infection.txt"
+        return "$status"
+    fi
 
+    report infection | tee -a "$REPORTS_DIR/infection.txt"
     echo "Relatório: $REPORTS_DIR/infection.html"
 }
 
 summary() {
     echo
     echo "================ Resumo ($PROJECT_NAME, base $BASE) ================"
-    printf '%-12s %s\n' "PHPStan" "$(grep -E 'No errors|Found [0-9]+ error' "$REPORTS_DIR/phpstan.txt" 2>/dev/null | tail -1 | sed 's/^ *//;s/\[OK\] *//;s/\[ERROR\] *//' || true)"
-    printf '%-12s %s\n' "Rector" "$(grep -E 'would have (been )?changed|Rector is done' "$REPORTS_DIR/rector.txt" 2>/dev/null | tail -1 | sed 's/^ *//;s/\[OK\] *//' || true)"
-    printf '%-12s %s\n' "Cobertura" "$(grep -E '^ *Lines:' "$REPORTS_DIR/cobertura.txt" 2>/dev/null | head -1 | sed 's/^ *//' || true)"
-    printf '%-12s %s\n' "Infection" "$(grep -E 'Mutation Score Indicator' "$REPORTS_DIR/infection.txt" 2>/dev/null | tail -1 | sed 's/^ *//' || true)"
+    local tool label
+    for tool in phpstan rector cobertura infection; do
+        case "$tool" in
+            phpstan)   label="PHPStan" ;;
+            rector)    label="Rector" ;;
+            cobertura) label="Cobertura" ;;
+            infection) label="Infection" ;;
+        esac
+        printf '%-12s %s\n' "$label" "$(cat "$REPORTS_DIR/resumo-$tool.txt" 2>/dev/null || echo 'não rodou')"
+    done
     echo "Relatórios em $REPORTS_DIR"
 }
 
@@ -269,7 +295,7 @@ case "$COMMAND" in
     cobertura) run_coverage ;;
     infection) run_infection ;;
     tudo)
-        rm -f "$REPORTS_DIR"/phpstan.txt "$REPORTS_DIR"/rector.txt "$REPORTS_DIR"/cobertura.txt "$REPORTS_DIR"/infection.txt
+        rm -f "$REPORTS_DIR"/phpstan.* "$REPORTS_DIR"/rector.* "$REPORTS_DIR"/cobertura.txt "$REPORTS_DIR"/infection.txt "$REPORTS_DIR"/infection.json "$REPORTS_DIR"/resumo-*.txt
         run_phpstan || true
         run_rector || true
         run_infection || true
