@@ -18,6 +18,12 @@ export default [
             'no-var': 'warn',
             'prefer-const': 'warn',
             eqeqeq: ['warn', 'always'],
+            'no-console': 'warn',
+            'no-implicit-globals': 'error',
+            curly: ['error', 'all'],
+            'prefer-template': 'warn',
+            'prefer-arrow-callback': 'warn',
+            'object-shorthand': 'warn',
         },
     },
 ];

@@ -164,10 +164,12 @@ Ficam em `relatorios/<nome-do-projeto>/`, fora do projeto:
   `QUALIDADE_IMAGEM=laravel-qualidade:php8.3 qualidade tudo`.
 - **Regras do Rector ou do PHPStan:** edite os arquivos em `modelos/`. Eles valem para todos os projetos.
 - **Frontend:** o formato do Prettier está em `modelos/prettier.json` e as regras do Stylelint em
-  `modelos/stylelint.json` (o `stylelint-config-standard` sem as regras de formato, que ficam com o Prettier, mais as
-  regras do guia de design: sem gradiente, raio até 12px, sem peso 800/900, sem `!important`) e as do ESLint em
-  `modelos/eslint.config.mjs` (as recomendadas do ESLint, que pegam erro, mais `no-var`, `prefer-const` e `eqeqeq`
-  como aviso; o formato fica com o Prettier). As ferramentas rodam num container `node:22-alpine` e ficam instaladas
+  `modelos/stylelint.json` (o `stylelint-config-standard` sem as regras de formato, que ficam com o Prettier; nomes em
+  kebab-case, aceitando o BEM do select2; sem seletor por `#id`, sem cor por nome, sem `div.classe`; e as regras do
+  guia de design: sem gradiente, raio até 12px, sem peso 800/900, sem `!important`) e as do ESLint em
+  `modelos/eslint.config.mjs` (as recomendadas do ESLint, que pegam erro, mais `no-implicit-globals` e `curly` como
+  erro e `no-var`, `prefer-const`, `eqeqeq`, `no-console`, `prefer-template`, `prefer-arrow-callback` e
+  `object-shorthand` como aviso; o formato fica com o Prettier, que no CSS mantém aspas duplas). As ferramentas rodam num container `node:22-alpine` e ficam instaladas
   em `cache/frontend`, com as versões fixadas no script; para atualizar, mude as variáveis `PRETTIER`, `STYLELINT`,
   `STYLELINT_CONFIG`, `ESLINT`, `ESLINT_JS` e `ESLINT_GLOBALS` no `qualidade`.
 - **Atualizar as ferramentas:** mude as versões no `Dockerfile`, reconstrua a imagem e teste com `qualidade tudo`

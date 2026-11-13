@@ -16,9 +16,15 @@
                 "900"
             ]
         },
-        "selector-class-pattern": null,
-        "custom-property-pattern": null,
-        "keyframes-name-pattern": null,
-        "declaration-block-single-line-max-declarations": null
+        "selector-class-pattern": [
+            "^[a-z][a-z0-9]*(-[a-z0-9]+)*(__[a-z0-9]+(-[a-z0-9]+)*)?(--[a-z0-9]+(-[a-z0-9]+)*)?$",
+            {
+                "message": "Classe em kebab-case (o BEM do select2, com __ e --, tamb\u00e9m vale)."
+            }
+        ],
+        "declaration-block-single-line-max-declarations": null,
+        "selector-max-id": 0,
+        "color-named": "never",
+        "selector-no-qualifying-type": true
     }
 }
