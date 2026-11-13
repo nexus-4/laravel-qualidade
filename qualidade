@@ -3,6 +3,10 @@ set -euo pipefail
 
 TOOLBOX_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 IMAGE="${QUALIDADE_IMAGEM:-laravel-qualidade:php8.4}"
+NODE_IMAGE="${QUALIDADE_IMAGEM_NODE:-node:22-alpine}"
+PRETTIER="prettier@3.3.3"
+STYLELINT="stylelint@16.10.0"
+STYLELINT_CONFIG="stylelint-config-standard@36.0.1"
 
 BASE="origin/homologation"
 LEVEL=6
@@ -20,6 +24,7 @@ Comandos:
   cobertura   testes com PCOV, relatório HTML e dados para o Infection
   infection   cobertura e depois Infection só nas linhas alteradas
   tudo        phpstan, rector e infection, com um resumo no final
+  frontend    Prettier (formato) e Stylelint (erros e regras do DESIGN.md) nos .css e .js de public/ alterados
 
 Opções:
   --base=<ref>      branch ou commit de comparação (padrão: origin/homologation)
@@ -27,6 +32,7 @@ Opções:
   --testes=<path>   roda só esses testes na cobertura e no Infection
   --threads=<n>     threads do Infection (padrão: 1, por causa do banco de testes)
   --aplicar         rector: grava as mudanças nos arquivos (exige os arquivos sem mudanças pendentes)
+                    frontend: formata os arquivos alterados com o Prettier
 HELP
 }
 
@@ -273,6 +279,83 @@ JSON
     echo "Relatório: $REPORTS_DIR/infection.html"
 }
 
+changed_frontend_files() {
+    local merge_base
+    merge_base="$(merge_base)"
+
+    {
+        git -C "$PROJECT_DIR" diff --name-only --diff-filter=ACMR "$merge_base" -- 'public/css/*.css' 'public/js/*.js'
+        git -C "$PROJECT_DIR" ls-files --others --exclude-standard -- 'public/css/*.css' 'public/js/*.js'
+    } | sort -u | while read -r file; do
+        [ -f "$PROJECT_DIR/$file" ] && echo "$file"
+    done
+}
+
+run_node_container() {
+    docker run --rm \
+        --user "$(id -u):$(id -g)" \
+        -e HOME=/tmp \
+        -e npm_config_cache=/cache/npm \
+        -e npm_config_update_notifier=false \
+        -v "$PROJECT_DIR":/app \
+        -v "$CACHE_DIR":/cache \
+        -v "$TOOLBOX_DIR/modelos":/modelos:ro \
+        -w /app \
+        "$NODE_IMAGE" "$@"
+}
+
+ensure_frontend_tools() {
+    local stamp="$CACHE_DIR/frontend/.versoes"
+    local wanted="$PRETTIER $STYLELINT $STYLELINT_CONFIG"
+
+    [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$wanted" ] && return 0
+
+    echo "Instalando $wanted em $CACHE_DIR/frontend..."
+    mkdir -p "$CACHE_DIR/frontend"
+    run_node_container npm install --prefix /cache/frontend --no-save --no-audit --no-fund --loglevel=error $wanted
+    echo "$wanted" > "$stamp"
+}
+
+run_frontend() {
+    local files=() css=() file status=0
+    while read -r file; do
+        files+=("$file")
+        [[ "$file" == *.css ]] && css+=("$file")
+    done < <(changed_frontend_files)
+
+    if [ ${#files[@]} -eq 0 ]; then
+        echo "Nenhum .css ou .js de public/ alterado em relação a $BASE."
+        echo "nenhum arquivo alterado" > "$REPORTS_DIR/resumo-frontend.txt"
+        return 0
+    fi
+
+    ensure_frontend_tools
+
+    echo "── Prettier: formato (${#files[@]} arquivo(s)) ───────────────────────────"
+    if [ "$APPLY" = 1 ]; then
+        run_node_container /cache/frontend/node_modules/.bin/prettier --config /modelos/prettier.json --write "${files[@]}"
+    else
+        run_node_container /cache/frontend/node_modules/.bin/prettier --config /modelos/prettier.json --check "${files[@]}" || {
+            status=1
+            echo "Para formatar: qualidade frontend --aplicar (faça a formatação num commit separado)."
+        }
+    fi
+
+    if [ ${#css[@]} -gt 0 ]; then
+        echo
+        echo "── Stylelint: erros e regras do DESIGN.md (${#css[@]} arquivo(s)) ─────────"
+        run_node_container /cache/frontend/node_modules/.bin/stylelint --config /modelos/stylelint.json --config-basedir /cache/frontend "${css[@]}" || status=1
+    fi
+
+    if [ "$status" = 0 ]; then
+        echo "ok em ${#files[@]} arquivo(s)" > "$REPORTS_DIR/resumo-frontend.txt"
+    else
+        echo "pendências em ${#files[@]} arquivo(s)" > "$REPORTS_DIR/resumo-frontend.txt"
+    fi
+
+    return "$status"
+}
+
 summary() {
     echo
     echo "================ Resumo ($PROJECT_NAME, base $BASE) ================"
@@ -294,6 +377,7 @@ case "$COMMAND" in
     rector)    run_rector ;;
     cobertura) run_coverage ;;
     infection) run_infection ;;
+    frontend)  run_frontend ;;
     tudo)
         rm -f "$REPORTS_DIR"/phpstan.* "$REPORTS_DIR"/rector.* "$REPORTS_DIR"/cobertura.txt "$REPORTS_DIR"/infection.txt "$REPORTS_DIR"/infection.json "$REPORTS_DIR"/resumo-*.txt
         run_phpstan || true

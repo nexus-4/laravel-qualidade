@@ -1,0 +1,24 @@
+{
+    "extends": [
+        "stylelint-config-standard"
+    ],
+    "rules": {
+        "declaration-no-important": true,
+        "declaration-property-value-disallowed-list": {
+            "/^background/": [
+                "/gradient/"
+            ],
+            "border-radius": [
+                "/^(1[3-9]|[2-9][0-9])px/"
+            ],
+            "font-weight": [
+                "800",
+                "900"
+            ]
+        },
+        "selector-class-pattern": null,
+        "custom-property-pattern": null,
+        "keyframes-name-pattern": null,
+        "declaration-block-single-line-max-declarations": null
+    }
+}
