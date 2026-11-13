@@ -16,6 +16,7 @@ continua igual, e o time não precisa adotar as ferramentas para você usar.
 | Infection | Se houvesse um bug nesta linha, algum teste perceberia? | testes que passam mesmo com o código errado |
 | Prettier | O CSS e o JS estão no formato padrão? | várias propriedades na mesma linha, indentação e aspas diferentes |
 | Stylelint | O CSS tem erro ou foge do guia de design? | seletor duplicado, regra fora de ordem de especificidade, gradiente, raio acima de 12px, `!important` |
+| ESLint | O JS tem erro ou usa sintaxe antiga? | variável não declarada ou sem uso, código inalcançável, `var`, `==` |
 
 ## Requisitos
 
@@ -52,7 +53,7 @@ qualidade rector        # Rector em simulação (não altera nada) nos mesmos ar
 qualidade cobertura     # testes com PCOV, relatório HTML e dados para o Infection
 qualidade infection     # cobertura e depois Infection só nas linhas que a branch mudou
 qualidade tudo          # phpstan, rector e infection, com um resumo no final
-qualidade frontend      # Prettier e Stylelint nos .css e .js de public/ que a branch mudou (só confere)
+qualidade frontend      # Prettier, Stylelint (CSS) e ESLint (JS) nos .css e .js de public/ que a branch mudou (só confere)
 qualidade frontend --aplicar   # formata esses arquivos com o Prettier (faça num commit separado)
 qualidade ajuda         # lista os comandos e as opções
 ```
@@ -164,9 +165,11 @@ Ficam em `relatorios/<nome-do-projeto>/`, fora do projeto:
 - **Regras do Rector ou do PHPStan:** edite os arquivos em `modelos/`. Eles valem para todos os projetos.
 - **Frontend:** o formato do Prettier está em `modelos/prettier.json` e as regras do Stylelint em
   `modelos/stylelint.json` (o `stylelint-config-standard` sem as regras de formato, que ficam com o Prettier, mais as
-  regras do guia de design: sem gradiente, raio até 12px, sem peso 800/900, sem `!important`). As ferramentas rodam
-  num container `node:22-alpine` e ficam instaladas em `cache/frontend`, com as versões fixadas no script; para
-  atualizar, mude as variáveis `PRETTIER`, `STYLELINT` e `STYLELINT_CONFIG` no `qualidade`.
+  regras do guia de design: sem gradiente, raio até 12px, sem peso 800/900, sem `!important`) e as do ESLint em
+  `modelos/eslint.config.mjs` (as recomendadas do ESLint, que pegam erro, mais `no-var`, `prefer-const` e `eqeqeq`
+  como aviso; o formato fica com o Prettier). As ferramentas rodam num container `node:22-alpine` e ficam instaladas
+  em `cache/frontend`, com as versões fixadas no script; para atualizar, mude as variáveis `PRETTIER`, `STYLELINT`,
+  `STYLELINT_CONFIG`, `ESLINT`, `ESLINT_JS` e `ESLINT_GLOBALS` no `qualidade`.
 - **Atualizar as ferramentas:** mude as versões no `Dockerfile`, reconstrua a imagem e teste com `qualidade tudo`
   num projeto conhecido antes de commitar.
 

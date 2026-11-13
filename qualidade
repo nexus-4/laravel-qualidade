@@ -7,6 +7,9 @@ NODE_IMAGE="${QUALIDADE_IMAGEM_NODE:-node:22-alpine}"
 PRETTIER="prettier@3.3.3"
 STYLELINT="stylelint@16.10.0"
 STYLELINT_CONFIG="stylelint-config-standard@36.0.1"
+ESLINT="eslint@9.13.0"
+ESLINT_JS="@eslint/js@9.13.0"
+ESLINT_GLOBALS="globals@15.11.0"
 
 BASE="origin/homologation"
 LEVEL=6
@@ -24,7 +27,7 @@ Comandos:
   cobertura   testes com PCOV, relatório HTML e dados para o Infection
   infection   cobertura e depois Infection só nas linhas alteradas
   tudo        phpstan, rector e infection, com um resumo no final
-  frontend    Prettier (formato) e Stylelint (erros e regras do DESIGN.md) nos .css e .js de public/ alterados
+  frontend    Prettier (formato), Stylelint (CSS: erros e regras do DESIGN.md) e ESLint (JS: erros e JS moderno) nos .css e .js de public/ alterados
 
 Opções:
   --base=<ref>      branch ou commit de comparação (padrão: origin/homologation)
@@ -306,7 +309,9 @@ run_node_container() {
 
 ensure_frontend_tools() {
     local stamp="$CACHE_DIR/frontend/.versoes"
-    local wanted="$PRETTIER $STYLELINT $STYLELINT_CONFIG"
+    local wanted="$PRETTIER $STYLELINT $STYLELINT_CONFIG $ESLINT $ESLINT_JS $ESLINT_GLOBALS"
+
+    cp "$TOOLBOX_DIR/modelos/eslint.config.mjs" "$CACHE_DIR/frontend/eslint.config.mjs" 2>/dev/null || true
 
     [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$wanted" ] && return 0
 
@@ -314,13 +319,15 @@ ensure_frontend_tools() {
     mkdir -p "$CACHE_DIR/frontend"
     run_node_container npm install --prefix /cache/frontend --no-save --no-audit --no-fund --loglevel=error $wanted
     echo "$wanted" > "$stamp"
+    cp "$TOOLBOX_DIR/modelos/eslint.config.mjs" "$CACHE_DIR/frontend/eslint.config.mjs"
 }
 
 run_frontend() {
-    local files=() css=() file status=0
+    local files=() css=() js=() file status=0
     while read -r file; do
         files+=("$file")
         [[ "$file" == *.css ]] && css+=("$file")
+        [[ "$file" == *.js ]] && js+=("$file")
     done < <(changed_frontend_files)
 
     if [ ${#files[@]} -eq 0 ]; then
@@ -345,6 +352,12 @@ run_frontend() {
         echo
         echo "── Stylelint: erros e regras do DESIGN.md (${#css[@]} arquivo(s)) ─────────"
         run_node_container /cache/frontend/node_modules/.bin/stylelint --config /modelos/stylelint.json --config-basedir /cache/frontend "${css[@]}" || status=1
+    fi
+
+    if [ ${#js[@]} -gt 0 ]; then
+        echo
+        echo "── ESLint: erros e JS moderno (${#js[@]} arquivo(s)) ─────────────────────"
+        run_node_container /cache/frontend/node_modules/.bin/eslint --config /cache/frontend/eslint.config.mjs "${js[@]}" || status=1
     fi
 
     if [ "$status" = 0 ]; then
