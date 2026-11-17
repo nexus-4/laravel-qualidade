@@ -163,15 +163,25 @@ Ficam em `relatorios/<nome-do-projeto>/`, fora do projeto:
 - **Outra versão do PHP:** `docker build --build-arg PHP_VERSION=8.3 -t laravel-qualidade:php8.3 .` e rode com
   `QUALIDADE_IMAGEM=laravel-qualidade:php8.3 qualidade tudo`.
 - **Regras do Rector ou do PHPStan:** edite os arquivos em `modelos/`. Eles valem para todos os projetos.
-- **Frontend:** o formato do Prettier está em `modelos/prettier.json` e as regras do Stylelint em
-  `modelos/stylelint.json` (o `stylelint-config-standard` sem as regras de formato, que ficam com o Prettier; nomes em
-  kebab-case, aceitando o BEM do select2; sem seletor por `#id`, sem cor por nome, sem `div.classe`; e as regras do
-  guia de design: sem gradiente, raio até 12px, sem peso 800/900, sem `!important`) e as do ESLint em
-  `modelos/eslint.config.mjs` (as recomendadas do ESLint, que pegam erro, mais `no-implicit-globals` e `curly` como
-  erro e `no-var`, `prefer-const`, `eqeqeq`, `no-console`, `prefer-template`, `prefer-arrow-callback` e
-  `object-shorthand` como aviso; o formato fica com o Prettier, que no CSS mantém aspas duplas). As ferramentas rodam num container `node:22-alpine` e ficam instaladas
-  em `cache/frontend`, com as versões fixadas no script; para atualizar, mude as variáveis `PRETTIER`, `STYLELINT`,
-  `STYLELINT_CONFIG`, `ESLINT`, `ESLINT_JS` e `ESLINT_GLOBALS` no `qualidade`.
+- **Frontend:** quando o projeto tem as ferramentas versionadas em `scripts/ci/frontend/` (`package.json`,
+  `package-lock.json`, `prettier.json`, `stylelint.json` e `eslint.config.mjs`), o `qualidade frontend` usa as
+  versões e as configurações de lá, as mesmas do CI do projeto. Ele instala com `npm ci` num container
+  `node:22-alpine` e só reinstala quando o lock muda. Para outra pasta, use `QUALIDADE_FRONTEND_DIR=<pasta>`. A saída
+  diz de onde vieram as ferramentas.
+
+  Sem essa pasta, valem as da caixa: o formato do Prettier em `modelos/prettier.json`, as regras do Stylelint em
+  `modelos/stylelint.json` (o `stylelint-config-standard` sem a regra de linha em branco entre regras, que é formato e
+  fica com o Prettier; nomes em kebab-case, aceitando o BEM do select2; sem seletor por `#id`, sem cor por nome, sem
+  `div.classe`; e as regras do guia de design: sem gradiente, raio até 12px também nos cantos e em rem/em, sem peso
+  800/900, sem `!important`) e as do ESLint em `modelos/eslint.config.mjs` (as recomendadas, que pegam erro, com
+  `no-unused-vars` só nas variáveis locais, porque as funções chamadas pelo Blade são globais de propósito, e `curly`
+  como erro; `no-var`, `prefer-const`, `eqeqeq`, `no-console`, `prefer-template`, `prefer-arrow-callback` e
+  `object-shorthand` como aviso). Elas ficam instaladas em `cache/frontend`, com as versões fixadas no script; para
+  atualizar, mude as variáveis `PRETTIER`, `STYLELINT`, `STYLELINT_CONFIG`, `ESLINT`, `ESLINT_JS` e `ESLINT_GLOBALS`
+  no `qualidade`, de preferência para as mesmas do projeto.
+
+  A caixa olha a pasta de trabalho (inclusive o que ainda não foi commitado), para servir de prévia antes do commit;
+  o CI olha só os commits. As regras e as versões são as mesmas.
 - **Atualizar as ferramentas:** mude as versões no `Dockerfile`, reconstrua a imagem e teste com `qualidade tudo`
   num projeto conhecido antes de commitar.
 
