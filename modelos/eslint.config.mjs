@@ -19,7 +19,7 @@ export default [
             'prefer-const': 'warn',
             eqeqeq: ['warn', 'always'],
             'no-console': 'warn',
-            'no-implicit-globals': 'error',
+            'no-unused-vars': ['error', { vars: 'local' }],
             curly: ['error', 'all'],
             'prefer-template': 'warn',
             'prefer-arrow-callback': 'warn',
