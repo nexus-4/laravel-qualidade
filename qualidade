@@ -10,6 +10,7 @@ STYLELINT_CONFIG="stylelint-config-standard@36.0.1"
 ESLINT="eslint@9.13.0"
 ESLINT_JS="@eslint/js@9.13.0"
 ESLINT_GLOBALS="globals@15.11.0"
+FRONTEND_DIR="${QUALIDADE_FRONTEND_DIR:-scripts/ci/frontend}"
 
 BASE="origin/homologation"
 LEVEL=6
@@ -322,6 +323,41 @@ ensure_frontend_tools() {
     cp "$TOOLBOX_DIR/modelos/eslint.config.mjs" "$CACHE_DIR/frontend/eslint.config.mjs"
 }
 
+has_project_frontend_tools() {
+    [ -f "$PROJECT_DIR/$FRONTEND_DIR/package-lock.json" ]
+}
+
+ensure_project_frontend_tools() {
+    local stamp="$PROJECT_DIR/$FRONTEND_DIR/node_modules/.qualidade-lock"
+    local wanted
+    wanted="$(cksum < "$PROJECT_DIR/$FRONTEND_DIR/package-lock.json")"
+
+    [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$wanted" ] && return 0
+
+    echo "Instalando as ferramentas do projeto (npm ci em $FRONTEND_DIR)..."
+    run_node_container npm ci --prefix "/app/$FRONTEND_DIR" --no-audit --no-fund --loglevel=error
+    echo "$wanted" > "$stamp"
+}
+
+select_frontend_tools() {
+    if has_project_frontend_tools; then
+        ensure_project_frontend_tools
+        FRONTEND_ORIGIN="do projeto ($FRONTEND_DIR)"
+        FRONTEND_BIN="/app/$FRONTEND_DIR/node_modules/.bin"
+        PRETTIER_CONFIG="/app/$FRONTEND_DIR/prettier.json"
+        STYLELINT_ARGS=(--config "/app/$FRONTEND_DIR/stylelint.json")
+        ESLINT_CONFIG="/app/$FRONTEND_DIR/eslint.config.mjs"
+        return 0
+    fi
+
+    ensure_frontend_tools
+    FRONTEND_ORIGIN="da caixa (modelos/)"
+    FRONTEND_BIN="/cache/frontend/node_modules/.bin"
+    PRETTIER_CONFIG="/modelos/prettier.json"
+    STYLELINT_ARGS=(--config /modelos/stylelint.json --config-basedir /cache/frontend)
+    ESLINT_CONFIG="/cache/frontend/eslint.config.mjs"
+}
+
 run_frontend() {
     local files=() css=() js=() file status=0
     while read -r file; do
@@ -336,13 +372,15 @@ run_frontend() {
         return 0
     fi
 
-    ensure_frontend_tools
+    select_frontend_tools
+    echo "Ferramentas e configuração $FRONTEND_ORIGIN."
+    echo
 
     echo "── Prettier: formato (${#files[@]} arquivo(s)) ───────────────────────────"
     if [ "$APPLY" = 1 ]; then
-        run_node_container /cache/frontend/node_modules/.bin/prettier --config /modelos/prettier.json --write "${files[@]}"
+        run_node_container "$FRONTEND_BIN/prettier" --config "$PRETTIER_CONFIG" --write "${files[@]}"
     else
-        run_node_container /cache/frontend/node_modules/.bin/prettier --config /modelos/prettier.json --check "${files[@]}" || {
+        run_node_container "$FRONTEND_BIN/prettier" --config "$PRETTIER_CONFIG" --check "${files[@]}" || {
             status=1
             echo "Para formatar: qualidade frontend --aplicar (faça a formatação num commit separado)."
         }
@@ -351,13 +389,13 @@ run_frontend() {
     if [ ${#css[@]} -gt 0 ]; then
         echo
         echo "── Stylelint: erros e regras do DESIGN.md (${#css[@]} arquivo(s)) ─────────"
-        run_node_container /cache/frontend/node_modules/.bin/stylelint --config /modelos/stylelint.json --config-basedir /cache/frontend "${css[@]}" || status=1
+        run_node_container "$FRONTEND_BIN/stylelint" "${STYLELINT_ARGS[@]}" "${css[@]}" || status=1
     fi
 
     if [ ${#js[@]} -gt 0 ]; then
         echo
         echo "── ESLint: erros e JS moderno (${#js[@]} arquivo(s)) ─────────────────────"
-        run_node_container /cache/frontend/node_modules/.bin/eslint --config /cache/frontend/eslint.config.mjs "${js[@]}" || status=1
+        run_node_container "$FRONTEND_BIN/eslint" --config "$ESLINT_CONFIG" "${js[@]}" || status=1
     fi
 
     if [ "$status" = 0 ]; then
